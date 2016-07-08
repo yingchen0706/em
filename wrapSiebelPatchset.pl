@@ -21,6 +21,22 @@ use 5.012;
 my %param;
 my %respFileParam;
 my $sep = '/';
+my %platform = (
+  233   =>  'Windows',
+  912   =>  'Windows',
+  46    =>  'Linux',
+  226   =>  'Linux',
+  211   =>  'Linux',
+  209   =>  'Linux',
+  525   =>  'Linux',
+  23    =>  'Solaris',
+  173   =>  'Solaris',
+  267   =>  'Solaris',
+  319   =>  'AIX',
+  212   =>  'AIX',
+  197   =>  'HPUX',
+  59    =>  'HPUX'
+);
 
 sub processInputArgs {
   my $key;
@@ -38,110 +54,60 @@ sub processInputArgs {
   }
 }
 
-sub prepRespFileParams {
-  my $stageLoc = $param{sl};
-  my $platform = $param{pl};
-
-  my $prodXML = $stageLoc.$sep.'products.txt';
-  open(my $fh, "<", $prodXML)
-    or die "Error: no products.txt found in Patchset.";
-
-  my $patchName = '';
-
-  while (my $line = <$fh>) {
-    if ((substr $line, 0, 1) eq '[') {
-      print $patchName."\n";
-      $patchName = substr $line, 1, -3;
-      last;
-    }
-  }
-  
-  if ($patchName eq '') {
-    die "Error: patch invalid, cannot find patch name in products.txt";
-  }
-
-  my $disk1Path = $stageLoc.$sep.$patchName.$sep.$platform.$sep.'Server'.$sep.'Siebel_Enterprise_Server'.$sep.'Disk1'.$sep;
-  
-  $respFileParam{sh} = $disk1Path;
-  $respFileParam{fl} = $disk1Path.'stage'.$sep.'products.xml';
-  $respFileParam{tl} = 'oracle.siebel.ses';
-  my $index = index($patchName, 'patchset');
-  $respFileParam{sv} = substr($patchName, 0, $index).'0';
-  $respFileParam{oh} = $param{oh};
-  $respFileParam{on} = $param{on};
-  $respFileParam{gi} = 'true';
-  $respFileParam{si} = 'true';
-  $respFileParam{sl} = '[English]'; #TODO;
-  $respFileParam{dl} = '{"oracle.siebel.ses","'.$respFileParam{sv}.'"}';
-  $respFileParam{pn} = $param{pn};
+sub trim {
+  my $s = shift;
+  $s =~ s/^\s+|\s+$//g;
+  return $s;
 }
 
-sub genRespFile {
-  my %args = %respFileParam;
+sub readParamFromIni {
+  my $ini = shift;
 
-  if (!defined $args{pn}) {
-    print "Error: Response file path invalid! \n";
-    return;
+  open my $fh, "<", $ini or die "Error: Could not find ini file";
+  foreach my $line (<$fh>) {
+    $line = trim($line);
+    if ($line ne "" && 
+      substr($line, 0, 1) ne "#") {
+      my ($key, $val) = split /=/, $line, 2;
+      $key = trim $key;
+      $val = trim $val;
+      if ($key ne "") {
+        $param{$key} = $val;
+      }
+    } 
   }
-
-  my $filename = $args{pn};
-  my $tempfile = $filename.".temp";
-  
-  #print "Creating response file from template file - $filename \n";
-  
-  if(open(temp_FH, ">", $tempfile)) {
-    print temp_FH "RESPONSEFILE_VERSION=2.2.1.0.0\n";
-    print temp_FH "s_shiphomeLocation=\"$args{sh}\"\n";
-    print temp_FH "FROM_LOCATION=\"$args{fl}\"\n";
-    print temp_FH "s_topLevelComp=\"$args{tl}\"\n";
-    print temp_FH "s_SiebelVersion=\"$args{sv}\"\n";
-    print temp_FH "ORACLE_HOME=\"$args{oh}\"\n";
-    print temp_FH "ORACLE_HOME_NAME=\"$args{on}\"\n";
-    print temp_FH "b_isGatewayInstalled=\"$args{gi}\"\n";
-    print temp_FH "b_isSiebsrvrInstalled=\"$args{si}\"\n";
-    print temp_FH "selectedLangs=\"$args{sl}\"\n";
-    print temp_FH "DEINSTALL_LIST=$args{dl}\n";
-    print temp_FH "SHOW_DEINSTALL_CONFIRMATION=true\n";
-    print temp_FH "SHOW_DEINSTALL_PROGRESS=true\n";
-
-    close(temp_FH);
-    unlink "$filename" if -e "$filename";
-    copy("$tempfile", "$filename");
-    unlink "$tempfile" if -e "$tempfile";
-  }
-  else {
-    print "Cannot open temp cfg file $tempfile \n";
-  }
-}
-
-sub runInstaller {
-  my $commandParam = '-invPtrLoc ~/oraInst.loc -silent -responseFile ~/test.rsp -waitforcompletion';
-  my $command = $respFileParam{sh}.'install'.$sep.'runInstaller.sh'.' '.$commandParam;
-  print $command."\n";
+  close $fh;
 }
 
 sub runCommand {
   my ($command, $errMsg) = @_;
-  print $command."\n";
+  print "Running command: ".$command."\n";
   if (defined $errMsg) {
-    system ($command)
+    system $command
       and die $errMsg;
   } else {
-    system ($command);
+    system $command;
   }
 }
 
 my $targetLoc = "";
 my $zipLoc = ""; 
 my $patchLoc = "";
+my $patchId = "";
 
 sub unzipPatchset {
-  if (defined $param{zipLoc}) {
-    $zipLoc = $param{zipLoc};
+  print "\n[1] Unzip files\n";
+
+  $zipLoc = $param{zipLoc};
+  if (!$zipLoc) {
+    die "Error: Missing zip location in ini file!";
   }
-  if (defined $param{targetLoc}) {
-    $targetLoc = $param{targetLoc};
+
+  $targetLoc = $param{targetLoc};
+  if (!$targetLoc) {
+    die "Error: Missing target locatioin in ini file!";
   }
+  $targetLoc = File::Spec->catdir($targetLoc, time());
 
   # make sure targetLoc exist and empty
   if (-e $targetLoc) {
@@ -150,21 +116,14 @@ sub unzipPatchset {
   }
   make_path($targetLoc);
   
-  print "[1] Unzip files\n";
-  my $command = "unzip '$zipLoc/*.zip' -d $targetLoc\n";
-  runCommand $command, "Failed!";
-
-}
-
-sub trim {
-  my $s = shift;
-  $s =~ s/^\s+|\s+$//g;
-  return $s;
+  my $command = "unzip -q '$zipLoc/*.zip' -d $targetLoc\n";
+  runCommand($command, "Error: Failed at unzip Patchset zip files");
 }
 
 sub createImage {
+  print "\n[2] Create Patchset image\n";
+
   # first create rsp file
-  my $patchId = "";
   my $imgVersion = "";
   my $metaFile = "";
 
@@ -180,14 +139,13 @@ sub createImage {
     } 
   }
   closedir $dh;
-  print "imageVersion: $imgVersion\n"; # TODO delete
 
   if ($imgVersion eq "") {
     die "failed at getting imageVersion parameter of response file for image creator";
   }
 
   # get metdata xml file name
-  opendir($dh, $zipLoc);
+  opendir $dh, $zipLoc;
   while (readdir $dh) {
     if ($_ =~ /.*\.xml/) {
       $metaFile = $_;
@@ -198,83 +156,90 @@ sub createImage {
 
   # get bug number from metadata file
   $metaFile = File::Spec->catfile($zipLoc, $metaFile);
-  open (my $metaFH, $metaFile) or die "Error: Could not find metadata xml file: $metaFile";
-  my $inBugTag = 0;
+  open my $metaFH, $metaFile or die "Error: Could not find metadata xml file: $metaFile";
   my $start = 0;
   my $end = 0;
   my $line = "";
+  my $platform = "";
   foreach $line (<$metaFH>) {
-    if (index ($line, "<bug>") >= 0) {
-      $inBugTag = 1;
-    } elsif (index ($line, "</bug>") >= 0) {
-      die "Error: metadata xml file content invalid, cannot find bug number!";
-    } elsif ($inBugTag && ($start = index ($line, ">")) >= 0) {
-      ++$start;
+    if ( $patchId eq "" && ($start = index ($line, "<number>")) >= 0) {
+      $start += 8;
       $end = index ($line, "</number>");
       $patchId = substr($line, $start, $end - $start);
       $patchId = trim($patchId);
+    } elsif ($platform eq "" && ($start = index ($line, "<platform")) >= 0) {
+      $start = index $line, "id";
+      $start = index($line, "\"", $start) + 1;
+      $end = index $line, "\"", $start;
+      $platform = trim(substr($line, $start, $end -$start));
+      $platform = $platform{$platform};
       last;
     }
   }
-  print "PatchId: $patchId\n"; # TODO delete
+  close $metaFH;
+
   if ($patchId eq "") {
     die "Error: metadata xml file content invalid, cannot find bug number!";
   }
 
   # create response file
   $patchLoc = File::Spec->catdir($targetLoc, $patchId);
-  open (my $respFile, '>', File::Spec->catfile($targetLoc, "image.rsp")) or die "Error: Could not create response file for image creator!";
+  open my $respFile, '>', File::Spec->catfile($targetLoc, "image.rsp") or die "Error: Could not create response file for image creator!";
   print $respFile "imageVersion=\"$imgVersion\"\n";
   print $respFile "imageDirectory=\"$patchLoc\"\n";
-  print $respFile "platformList={$param{platform}}\n";
+  print $respFile "platformList={$platform}\n";
   print $respFile "productList={Siebel_Enterprise_Server}\n";
   print $respFile "languageList={$param{language}}\n";
   close $respFile;
   print "Created response file for Siebel Image Creator.\n"; 
 
   # then invoke image creator
-  if (-e $patchLoc) {
-    remove_tree($patchLoc);
-  }
+  remove_tree($patchLoc) if -e $patchLoc;
+
+  my $inputHelper = File::Spec->catfile($targetLoc, "enter");
+  open my $fh, ">", $inputHelper;
+  print $fh "\n";
+  close $fh;
 
   my $isWin = $^O =~ m/^(Windows|MSWin|msmy)/i;
-  my $postFix = " -silent -responseFile image.rsp ";
+  my $postFix = " -silent -responseFile image.rsp < $inputHelper > ".File::Spec->catfile($targetLoc, "log");
   my $command = "snic.sh";
   if ($isWin) {
     $command = "snic.bat";
   }
   $command = File::Spec->catfile($targetLoc, $command).$postFix; 
 
-  print "[2] Create Patchset image\n";
-  runCommand $command, "Error: failed at create Patchset image";
+  runCommand($command, "Error: failed at create Patchset image");
 
   # create needed files/directories
   my $configPath = File::Spec->catdir($patchLoc, "etc", "config");
   make_path($configPath);
   my $action = File::Spec->catfile($configPath, "actions.xml");
   my $tmp;
-  open($tmp, ">", $action) or die "Error: Could not create actions.xml in $action";
-  close($tmp);
+  open $tmp, ">", $action or die "Error: Could not create actions.xml in $action";
+  close $tmp;
   my $inv = File::Spec->catfile($configPath, "inventory.xml");
-  open($tmp, ">", $inv) or die "Error: Could not create inventory.xml in $inv";
+  open $tmp, ">", $inv or die "Error: Could not create inventory.xml in $inv";
   print $tmp "<oneoff_inventory>\n";
   print $tmp "<patch_id number=\"$patchId\" />\n";
   print $tmp "</oneoff_inventory>\n";
-  close($tmp); 
+  close $tmp; 
   my $readme = File::Spec->catfile($patchLoc, "README.txt");
-  open($tmp, ">", $readme) or die "Error: Could not create README.txt in $readme";
-  close($tmp);
+  open $tmp, ">", $readme or die "Error: Could not create README.txt in $readme";
+  close $tmp;
  
 }
 
 sub zipImage {
-  print "[3] Zip the created image\n";
+  print "\n[3] Zip the created image\n";
   if (-e File::Spec->catdir($patchLoc, "etc")) {
-    runCommand "zip -r $patchLoc.zip $patchLoc", "Error: failed at compressing Patchset image";
+    my $finalLoc = File::Spec->catfile($param{targetLoc}, $patchId.".zip");
+    unlink $finalLoc if (-e $finalLoc);
+    runCommand("zip -rq $finalLoc $patchLoc", "Error: failed at compressing Patchset image");
   } else {
     die "Error: Failed at creating Siebel image.";
   }
-  remove_tree($patchLoc);
+  remove_tree($targetLoc);
 }
 
 sub process {
@@ -288,19 +253,20 @@ sub process {
   # 3. zip the image
   zipImage();
 
-  print "Success! Final patch location: $patchLoc.zip\n";
+  print "\nSuccess! Final patch location: $patchLoc.zip\n\n";
 }
 
-processInputArgs();
+#processInputArgs();
 
-my @tmpList = %param;
-%param = (
-  zipLoc      => '/tmp/zip',
-  targetLoc   => '/tmp/patch',
-  platform    => 'Linux',
-  language    => 'ENU',
-  @tmpList
-);
+readParamFromIni("wrapSiebelPatchset.ini");
+#my @tmpList = %param;
+#%param = (
+#  zipLoc      => '/tmp/zip',
+#  targetLoc   => '/tmp/patch',
+#  platform    => 'Linux',
+#  language    => 'ENU',
+#  @tmpList
+#);
 
 process();
 
