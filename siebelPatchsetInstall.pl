@@ -14,10 +14,58 @@
 
 use strict;
 use File::Copy;
+use File::Spec;
 
 my %param;
 my %respFileParam;
-my $sep = '/';
+
+&processInputArgs();
+
+my @tmpList = %param;
+%param = (
+  sl    => '/tmp/p23144283_600000000019690_226_0/sblqa2/23144283',
+  pl    => 'Linux',
+  oh    => '/export/home/sblqa2/23048/ses',
+  on    => 'SES_HOME',
+  @tmpList
+);
+
+my %langMap = (
+  ENU => "English",
+  PSL => "PSL",
+  PSJ => "Vitenamese",
+  CHS => "Simplified Chinese",
+  CSY => "Czech",
+  DEU => "German",
+  SVE => "Swedish",
+  KOR => "Korean",
+  ITA => "Italian",
+  FIN => "Finnish",
+  THA => "Thai",
+  CHT => "Traditional Chinese",
+  PLK => "Polish",
+  PTB => "Brazilian Portuguese",
+  ESN => "Spanish",
+  ARA => "Arabic",
+  RUS => "Russian",
+  HEB => "Hebrew",
+  DAN => "Danish",
+  JPN => "Japanese",
+  FRA => "French",		
+  PTG => "Portuguese",
+  NLD => "Dutch",	
+  TRK => "Turkish"
+);
+
+&prepRespFileParams();
+&genRespFile();
+&runInstaller();
+
+sub trim {
+  my $s = shift;
+  $s =~ s/^\s+|\s+$//g;
+  return $s;
+}
 
 sub processInputArgs {
   my $key;
@@ -40,16 +88,16 @@ sub prepRespFileParams {
   my $stageLoc = $param{sl};
   my $platform = $param{pl};
 
-  my $prodXML = $stageLoc.$sep.'products.txt';
-  open(my $fh, "<", $prodXML)
+  my $prodXML = File::Spec->catfile($stageLoc, 'products.txt');
+  open my $fh, "<", $prodXML
     or die "Error: no products.txt found in Patchset.";
 
   my $patchName = '';
 
   while (my $line = <$fh>) {
+    $line = trim($line);
     if ((substr $line, 0, 1) eq '[') {
-      print $patchName."\n";
-      $patchName = substr $line, 1, -3;
+      $patchName = substr $line, 1, -1;
       last;
     }
   }
@@ -58,10 +106,11 @@ sub prepRespFileParams {
     die "Error: patch invalid, cannot find patch name in products.txt";
   }
 
-  my $disk1Path = $stageLoc.$sep.$patchName.$sep.$platform.$sep.'Server'.$sep.'Siebel_Enterprise_Server'.$sep.'Disk1'.$sep;
+  my $disk1Path = File::Spec->catdir($stageLoc, $patchName, $platform,
+    'Server', 'Siebel_Enterprise_Server', 'Disk1');
   
   $respFileParam{sh} = $disk1Path;
-  $respFileParam{fl} = $disk1Path.'stage'.$sep.'products.xml';
+  $respFileParam{fl} = File::Spec->catfile(File::Spec->catdir($disk1Path, 'stage'), 'products.xml');
   $respFileParam{tl} = 'oracle.siebel.ses';
   my $index = index($patchName, 'patchset');
   $respFileParam{sv} = substr($patchName, 0, $index).'0';
@@ -69,9 +118,31 @@ sub prepRespFileParams {
   $respFileParam{on} = $param{on};
   $respFileParam{gi} = 'true';
   $respFileParam{si} = 'true';
-  $respFileParam{sl} = '[English]'; #TODO;
+  $respFileParam{sl} = '['.&getLanguage.']';
   $respFileParam{dl} = '{"oracle.siebel.ses","'.$respFileParam{sv}.'"}';
-  $respFileParam{pn} = $param{pn};
+  $respFileParam{pn} = File::Spec->catfile($param{oh}, "ps.rsp");
+}
+
+sub getLanguage {
+  my $objPath = File::Spec->catdir($respFileParam{oh}, "siebsrvr", "objects");
+  my @langList = ();
+
+  opendir(my $dh, $objPath);
+  my @files = readdir $dh;
+  closedir $dh;
+
+  foreach my $key (@files) {
+    if (-d File::Spec->catdir($objPath, $key)) {
+      my $val = $langMap{uc($key)};
+      if (defined($val)) {
+        push @langList, $val;
+      }
+    }
+  }
+
+  die "Error: empty language list" if @langList == 0
+
+  join(',', @langList);
 }
 
 sub genRespFile {
@@ -84,8 +155,6 @@ sub genRespFile {
 
   my $filename = $args{pn};
   my $tempfile = $filename.".temp";
-  
-  #print "Creating response file from template file - $filename \n";
   
   if(open(temp_FH, ">", $tempfile)) {
     print temp_FH "RESPONSEFILE_VERSION=2.2.1.0.0\n";
@@ -103,32 +172,21 @@ sub genRespFile {
     print temp_FH "SHOW_DEINSTALL_PROGRESS=true\n";
 
     close(temp_FH);
-    unlink "$filename" if -e "$filename";
-    copy("$tempfile", "$filename");
-    unlink "$tempfile" if -e "$tempfile";
+    unlink $filename if -e $filename;
+    copy($tempfile, $filename);
+    unlink $tempfile if -e $tempfile;
   }
   else {
-    print "Cannot open temp cfg file $tempfile \n";
+    print "Cannot open temp response file $tempfile \n";
   }
 }
 
 sub runInstaller {
-  my $commandParam = '-invPtrLoc ~/oraInst.loc -silent -responseFile ~/test.rsp -waitforcompletion';
-  my $command = $respFileParam{sh}.'install'.$sep.'runInstaller.sh'.' '.$commandParam;
+  my $commandParam = '-invPtrLoc ~/oraInst.loc -silent -responseFile $respFileParam{pn} -waitforcompletion';
+  my $command = File::Spec->catfile(File::Spec->catdir($respFileParam{sh}, 'install'), 'runInstaller.sh').' '.$commandParam;
   print $command."\n";
+  #system($command) and die "Error: Failed at running $command";
+  #unlink $respFileParam{pn} if -e $respFileParam{pn};
 }
 
-processInputArgs();
-my @tmpList = %param;
-%param = (
-  sl    => '/tmp/p23144283_600000000019690_226_0/sblqa2/23144283',
-  pl    => 'Linux',
-  oh    => 'c:\Siebel\15.0.0.0.0\ses',
-  on    => 'SES_HOME',
-  pn    => 'test.rsp',
-  @tmpList
-);
 
-prepRespFileParams();
-genRespFile();
-runInstaller();
