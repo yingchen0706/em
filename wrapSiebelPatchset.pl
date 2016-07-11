@@ -19,8 +19,14 @@ use File::Spec;
 use 5.012;
 
 my %param;
-my %respFileParam;
-my $sep = '/';
+my $targetLoc = "";
+my $zipLoc = ""; 
+my $patchLoc = "";
+my $patchId = "";
+my $platform = "";
+my $imgVersion = "";
+my $metaFile = "";
+
 my %platform = (
   233   =>  'Windows',
   912   =>  'Windows',
@@ -37,6 +43,9 @@ my %platform = (
   197   =>  'HPUX',
   59    =>  'HPUX'
 );
+
+&readParamFromIni("wrapSiebelPatchset.ini");
+&process();
 
 sub processInputArgs {
   my $key;
@@ -90,11 +99,6 @@ sub runCommand {
   }
 }
 
-my $targetLoc = "";
-my $zipLoc = ""; 
-my $patchLoc = "";
-my $patchId = "";
-
 sub unzipPatchset {
   print "\n[1] Unzip files\n";
 
@@ -120,14 +124,7 @@ sub unzipPatchset {
   runCommand($command, "Error: Failed at unzip Patchset zip files");
 }
 
-sub createImage {
-  print "\n[2] Create Patchset image\n";
-
-  # first create rsp file
-  my $imgVersion = "";
-  my $metaFile = "";
-
-  # get image version
+sub getImageVersion {
   opendir(my $dh, $targetLoc);
   while (readdir $dh) {
     if ($_ =~ /SBA_.*\.jar/) {
@@ -139,13 +136,12 @@ sub createImage {
     } 
   }
   closedir $dh;
+}
 
-  if ($imgVersion eq "") {
-    die "failed at getting imageVersion parameter of response file for image creator";
-  }
+sub getPatchInfo {
 
   # get metdata xml file name
-  opendir $dh, $zipLoc;
+  opendir(my $dh, $zipLoc);
   while (readdir $dh) {
     if ($_ =~ /.*\.xml/) {
       $metaFile = $_;
@@ -154,13 +150,16 @@ sub createImage {
   }
   closedir $dh;
 
+  if ($metaFile eq "") {
+    die "Error: Could not find metadata xml file in $zipLoc";
+  }
+
   # get bug number from metadata file
   $metaFile = File::Spec->catfile($zipLoc, $metaFile);
-  open my $metaFH, $metaFile or die "Error: Could not find metadata xml file: $metaFile";
+  open my $metaFH, $metaFile or die "Error: Could not open metadata xml file: $metaFile";
   my $start = 0;
   my $end = 0;
   my $line = "";
-  my $platform = "";
   foreach $line (<$metaFH>) {
     if ( $patchId eq "" && ($start = index ($line, "<number>")) >= 0) {
       $start += 8;
@@ -178,11 +177,9 @@ sub createImage {
   }
   close $metaFH;
 
-  if ($patchId eq "") {
-    die "Error: metadata xml file content invalid, cannot find bug number!";
-  }
+}
 
-  # create response file
+sub createResponseFile {
   $patchLoc = File::Spec->catdir($targetLoc, $patchId);
   open my $respFile, '>', File::Spec->catfile($targetLoc, "image.rsp") or die "Error: Could not create response file for image creator!";
   print $respFile "imageVersion=\"$imgVersion\"\n";
@@ -192,8 +189,9 @@ sub createImage {
   print $respFile "languageList={$param{language}}\n";
   close $respFile;
   print "Created response file for Siebel Image Creator.\n"; 
+}
 
-  # then invoke image creator
+sub invokeImageCreator {
   remove_tree($patchLoc) if -e $patchLoc;
 
   my $inputHelper = File::Spec->catfile($targetLoc, "enter");
@@ -201,8 +199,8 @@ sub createImage {
   print $fh "\n";
   close $fh;
 
-  my $isWin = $^O =~ m/^(Windows|MSWin|msmy)/i;
   my $postFix = " -silent -responseFile image.rsp < $inputHelper > ".File::Spec->catfile($targetLoc, "log");
+  my $isWin = $^O =~ m/^(Windows|MSWin|msmy)/i;
   my $command = "snic.sh";
   if ($isWin) {
     $command = "snic.bat";
@@ -210,13 +208,14 @@ sub createImage {
   $command = File::Spec->catfile($targetLoc, $command).$postFix; 
 
   runCommand($command, "Error: failed at create Patchset image");
+}
 
+sub postCreateProcess {
   # create needed files/directories
   my $configPath = File::Spec->catdir($patchLoc, "etc", "config");
   make_path($configPath);
   my $action = File::Spec->catfile($configPath, "actions.xml");
-  my $tmp;
-  open $tmp, ">", $action or die "Error: Could not create actions.xml in $action";
+  open my $tmp, ">", $action or die "Error: Could not create actions.xml in $action";
   close $tmp;
   my $inv = File::Spec->catfile($configPath, "inventory.xml");
   open $tmp, ">", $inv or die "Error: Could not create inventory.xml in $inv";
@@ -227,7 +226,71 @@ sub createImage {
   my $readme = File::Spec->catfile($patchLoc, "README.txt");
   open $tmp, ">", $readme or die "Error: Could not create README.txt in $readme";
   close $tmp;
+}
+
+sub updateMetadataFile {
+  my $metaFileNew = File::Spec->catfile($param{targetLoc}, "$patchId.xml");
+  my $needCp = 1;
+  my $isInFiles = 0;
+  my $size = -s File::Spec->catfile($param{targetLoc}, $patchId.".zip");
+
+  open my $fhdst, ">", $metaFileNew or die "Error: error when update metadata xml file";
+  open my $fhsrc, "<", $metaFile or die "Error: error when update metadata xml file";
  
+  while (my $line = <$fhsrc>) {
+    if (index($line, "<files>") >= 0) {
+      print $fhdst $line;
+      $isInFiles = 1;
+    } elsif (index($line, "</files>") >= 0) {
+      print $fhdst $line;
+      $isInFiles = 0;
+    } elsif (!$isInFiles) {
+      if (index($line, "<size>") >= 0) {
+        $line =~ s/>.*</>$size</;
+      }
+      print $fhdst $line;
+    } elsif ($isInFiles) {
+      if ($needCp) {
+        if (index($line, "<name>") >= 0) {
+          my $tmp = ">$patchId.zip<";
+          $line =~ s/>.*</$tmp/;
+        } elsif (index($line, "<size>") >= 0) {
+          $line =~ s/>.*</>$size</;
+        }
+        print $fhdst $line;
+        if (index($line, "</file>") >= 0) {
+          $needCp = 0;
+        }
+      }
+    }
+  }
+  
+  close $fhdst;
+  close $fhsrc;
+}
+
+sub createImage {
+  print "\n[2] Create Patchset image\n";
+
+  getImageVersion();
+  if ($imgVersion eq "") {
+    die "failed at getting imageVersion parameter of response file for image creator";
+  }
+
+  getPatchInfo();
+  if ($patchId eq "") {
+    die "Error: Could not find bug number from metadata xml file";
+  }
+  if ($platform eq "") {
+    die "Error: Could not find platform info from metadata xml file";
+  }
+
+  createResponseFile();
+
+  invokeImageCreator();
+
+  postCreateProcess();
+
 }
 
 sub zipImage {
@@ -235,8 +298,14 @@ sub zipImage {
   if (-e File::Spec->catdir($patchLoc, "etc")) {
     my $finalLoc = File::Spec->catfile($param{targetLoc}, $patchId.".zip");
     unlink $finalLoc if (-e $finalLoc);
-    runCommand("zip -rq $finalLoc $patchLoc", "Error: failed at compressing Patchset image");
-  } else {
+    runCommand("cd $targetLoc; zip -rq $finalLoc $patchId", "Error: failed at compressing Patchset image");
+   
+    updateMetadataFile();
+
+    print "\nSuccess! Patch is in: $finalLoc";
+    print "\nSuccess! Metadata is in: ".File::Spec->catfile($param{targetLoc}, $patchId.".xml")."\n\n";
+
+   } else {
     die "Error: Failed at creating Siebel image.";
   }
   remove_tree($targetLoc);
@@ -253,12 +322,9 @@ sub process {
   # 3. zip the image
   zipImage();
 
-  print "\nSuccess! Final patch location: $patchLoc.zip\n\n";
 }
 
-#processInputArgs();
 
-readParamFromIni("wrapSiebelPatchset.ini");
 #my @tmpList = %param;
 #%param = (
 #  zipLoc      => '/tmp/zip',
@@ -268,5 +334,4 @@ readParamFromIni("wrapSiebelPatchset.ini");
 #  @tmpList
 #);
 
-process();
 
