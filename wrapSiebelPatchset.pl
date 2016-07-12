@@ -14,9 +14,8 @@
 
 use strict;
 use File::Copy;
-use File::Path qw(make_path remove_tree);
+use File::Path qw(mkpath rmtree);
 use File::Spec;
-use 5.012;
 
 my %param;
 my $targetLoc = "";
@@ -69,6 +68,10 @@ sub trim {
   return $s;
 }
 
+sub isWin {
+  return $^O =~ m/^(Windows|MSWin|msmy)/i;
+}
+
 sub readParamFromIni {
   my $ini = shift;
 
@@ -116,17 +119,20 @@ sub unzipPatchset {
   # make sure targetLoc exist and empty
   if (-e $targetLoc) {
     print "Clean up unzip location: $targetLoc\n";
-    remove_tree($targetLoc);
+    rmtree($targetLoc);
   }
-  make_path($targetLoc);
+  mkpath($targetLoc);
   
-  my $command = "unzip -q '$zipLoc/*.zip' -d $targetLoc\n";
+  my $command = "unzip -q \"".File::Spec->catfile($zipLoc, "*.zip")."\" -d $targetLoc\n";
   runCommand($command, "Error: Failed at unzip Patchset zip files");
 }
 
 sub getImageVersion {
   opendir(my $dh, $targetLoc);
-  while (readdir $dh) {
+  my @list = readdir $dh;
+  closedir $dh;
+
+  foreach (@list) {
     if ($_ =~ /SBA_.*\.jar/) {
       my @words = split /_/, $_, 3;
       if (defined $words[1]) {
@@ -135,20 +141,20 @@ sub getImageVersion {
       }
     } 
   }
-  closedir $dh;
 }
 
 sub getPatchInfo {
-
   # get metdata xml file name
   opendir(my $dh, $zipLoc);
-  while (readdir $dh) {
+  my @list = readdir $dh;
+  closedir $dh;
+
+  foreach (@list) {
     if ($_ =~ /.*\.xml/) {
       $metaFile = $_;
       last;
     }
   }
-  closedir $dh;
 
   if ($metaFile eq "") {
     die "Error: Could not find metadata xml file in $zipLoc";
@@ -192,7 +198,7 @@ sub createResponseFile {
 }
 
 sub invokeImageCreator {
-  remove_tree($patchLoc) if -e $patchLoc;
+  rmtree($patchLoc) if -e $patchLoc;
 
   my $inputHelper = File::Spec->catfile($targetLoc, "enter");
   open my $fh, ">", $inputHelper;
@@ -200,9 +206,8 @@ sub invokeImageCreator {
   close $fh;
 
   my $postFix = " -silent -responseFile image.rsp < $inputHelper > ".File::Spec->catfile($targetLoc, "log");
-  my $isWin = $^O =~ m/^(Windows|MSWin|msmy)/i;
   my $command = "snic.sh";
-  if ($isWin) {
+  if (isWin()) {
     $command = "snic.bat";
   }
   $command = File::Spec->catfile($targetLoc, $command).$postFix; 
@@ -213,7 +218,7 @@ sub invokeImageCreator {
 sub postCreateProcess {
   # create needed files/directories
   my $configPath = File::Spec->catdir($patchLoc, "etc", "config");
-  make_path($configPath);
+  mkpath($configPath);
   my $action = File::Spec->catfile($configPath, "actions.xml");
   open my $tmp, ">", $action or die "Error: Could not create actions.xml in $action";
   close $tmp;
@@ -298,7 +303,8 @@ sub zipImage {
   if (-e File::Spec->catdir($patchLoc, "etc")) {
     my $finalLoc = File::Spec->catfile($param{targetLoc}, $patchId.".zip");
     unlink $finalLoc if (-e $finalLoc);
-    runCommand("cd $targetLoc; zip -rq $finalLoc $patchId", "Error: failed at compressing Patchset image");
+    my $sep = isWin() ? "&" : ";";
+    runCommand("cd $targetLoc ".$sep." zip -rq $finalLoc $patchId", "Error: failed at compressing Patchset image");
    
     updateMetadataFile();
 
@@ -308,7 +314,7 @@ sub zipImage {
    } else {
     die "Error: Failed at creating Siebel image.";
   }
-  remove_tree($targetLoc);
+  rmtree($targetLoc);
 }
 
 sub process {
