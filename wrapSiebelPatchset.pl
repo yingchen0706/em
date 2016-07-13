@@ -4,13 +4,11 @@
 # Copyright (c) 2005, 2016, Oracle and/or its affiliates. All rights reserved.
 #
 #  NAME
-#     siebelGenRespFile.pl
+#     wrapSiebelPatchset.pl
 #
 #  DESCRIPTION
-#     This script is used to generate response files for Siebel PatchSet installation.
+#     This script is used to wrap the Siebel PatchSet zips from MOS to OPatch format.
 #
-
-#require 5.6.1;
 
 use strict;
 use File::Copy;
@@ -18,13 +16,13 @@ use File::Path qw(mkpath rmtree);
 use File::Spec;
 
 my %param;
-my $targetLoc = "";
-my $zipLoc = ""; 
-my $patchLoc = "";
+my $targetLoc = "";  # where final zip and xml should be
+my $zipLoc = "";     # where zip from MOS should be
+my $patchLoc = "";   # where the created image should be
 my $patchId = "";
 my $platform = "";
-my $imgVersion = "";
-my $metaFile = "";
+my $imgVersion = ""; # patchset image version
+my $metaFile = "";   # original metadata file name
 
 my %platform = (
   233   =>  'Windows',
