@@ -1,16 +1,26 @@
 #!/usr/bin/perl -w
 # $version$
-# 
+#
 # Copyright (c) 2005, 2016, Oracle and/or its affiliates. All rights reserved.
 #
 #  NAME
 #     siebelGenRespFile.pl
 #
 #  DESCRIPTION
-#     This script is used to generate response files for Siebel PatchSet installation.
+#     This script has following usage:
+#     1. Install Siebel Patchset in silient mode. It will create response file
+#        based on input argument and invoke OUI installer in silent mode.
+#     2. Run install precheck, check whether the patchset already applied.
+#     3. Run install postcheck, check whether the patchset has been applied successfully.
 #
-
-#require 5.6.1;
+#  Input arguments
+#     -patchLoc     specify the unzipped Patchset location.
+#     -platform     specify target platform, supported: Linux, Windows, Solaris, HPUX, AIX
+#                   No need for preCheck and postCheck.
+#     -oh           specify Oracle home.
+#     -ohn          specify Oracle home name. No need for preCheck and postCheck.
+#     -preCheck     indicate this is precheck, no value needed.
+#     -postCheck    indicate this is postCheck, no value needed.
 
 use strict;
 use File::Copy;
@@ -23,12 +33,16 @@ my %respFileParam;
 
 my @tmpList = %param;
 %param = (
-  sl    => '/tmp/p23144283_600000000019690_226_0/sblqa2/23144283',
-  pl    => 'Linux',
-  oh    => '/export/home/sblqa2/23048/ses',
-  on    => 'SES_HOME',
+  patchLoc    => '/tmp/p23144283_600000000019690_226_0/sblqa2/23144283',
+  platform    => 'Linux',
+  oh          => '/export/home/sblqa2/23048/ses',
+  ohn         => 'BIT_SES_23048',
+  preCheck    => 'true',
+  #postCheck   => 'true',
   @tmpList
 );
+
+my $invPtrLoc = '~/oraInst.loc';
 
 my %langMap = (
   ENU => "English",
@@ -51,15 +65,22 @@ my %langMap = (
   HEB => "Hebrew",
   DAN => "Danish",
   JPN => "Japanese",
-  FRA => "French",		
+  FRA => "French",
   PTG => "Portuguese",
-  NLD => "Dutch",	
+  NLD => "Dutch",
   TRK => "Turkish"
 );
 
 &prepRespFileParams();
-&genRespFile();
-&runInstaller();
+
+if (defined $param{pre}) {
+  &versionCheck(1);
+} elsif (defined $param{post}) {
+  &versionCheck();
+} else {
+  &genRespFile();
+  &runInstaller();
+}
 
 sub trim {
   my $s = shift;
@@ -67,21 +88,64 @@ sub trim {
   return $s;
 }
 
+sub isWin {
+  return $^O =~ m/^(Windows|MSWin|msmy)/i;
+}
+
 sub processInputArgs {
-  my $key;
-  my $val;
-  my $index = 0;
+  my $key = "";
+  my $val = "";
 
   foreach my $arg (@ARGV) {
-    if ($index % 2 == 0) {
+    if ((substr $arg, 0, 1) eq '-') {
       $key = substr $arg, 1;
+      $param{$key} = "";
     } else {
-      $val = $arg;
-      $param{$key} = $val;
-      #print $key."=".$val;    
+      if ($param{$key} eq "") {
+        $param{$key} = $arg;
+      }
     }
-    $index++;
   }
+
+  print "Input arguments:\n";
+  while (($key, $val) = each %param) {
+    printf "%-10s= %s\n", $key, $val;
+  }
+}
+
+# do version check by checking whether the patchset version
+# already contained in opatch output
+sub versionCheck {
+  my $isPre = shift;
+  my $targetVer = $respFileParam{sv};
+  my $opatch = File::Spec->catfile(File::Spec->catdir($respFileParam{oh}, 'OPatch'), 'opatch');
+
+  my $command = $opatch." lsinventory -oh $respFileParam{oh}";
+  if (!&isWin()) {
+    $command = $command." -invPtrLoc $invPtrLoc";
+  }
+  my $output = `$command`;
+
+  print "Execute version check command: $command\n";
+  print "Output: $output\n";
+
+  my $exitCode = 0;
+  if ($isPre) {
+    if ((index $output, $targetVer) >= 0) {
+      print "Error: Patchset already applied.\n";
+      $exitCode = 1;
+    } else {
+      print "Version check succeeded.\n";
+    }
+  } else {
+    if ((index $output, $targetVer) >= 0) {
+      print "Version check succeeded.\n";
+    } else {
+      print  "Error: Version check failed.";
+      $exitCode = 1;
+    }
+  }
+  exit $exitCode;
 }
 
 sub prepRespFileParams {
@@ -101,14 +165,14 @@ sub prepRespFileParams {
       last;
     }
   }
-  
+
   if ($patchName eq '') {
     die "Error: patch invalid, cannot find patch name in products.txt";
   }
 
   my $disk1Path = File::Spec->catdir($stageLoc, $patchName, $platform,
     'Server', 'Siebel_Enterprise_Server', 'Disk1');
-  
+
   $respFileParam{sh} = $disk1Path;
   $respFileParam{fl} = File::Spec->catfile(File::Spec->catdir($disk1Path, 'stage'), 'products.xml');
   $respFileParam{tl} = 'oracle.siebel.ses';
@@ -140,7 +204,7 @@ sub getLanguage {
     }
   }
 
-  die "Error: empty language list" if @langList == 0
+  die "Error: empty language list" if @langList == 0;
 
   join(',', @langList);
 }
@@ -155,7 +219,7 @@ sub genRespFile {
 
   my $filename = $args{pn};
   my $tempfile = $filename.".temp";
-  
+
   if(open(temp_FH, ">", $tempfile)) {
     print temp_FH "RESPONSEFILE_VERSION=2.2.1.0.0\n";
     print temp_FH "s_shiphomeLocation=\"$args{sh}\"\n";
@@ -181,12 +245,33 @@ sub genRespFile {
   }
 }
 
+sub createInputFile {
+  my $name = time();
+  my $inputHelper = File::Spec->catfile($respFileParam{oh}, $name);
+  open my $fh, ">", $inputHelper;
+  print $fh "\n\n\n\n\n";
+  close $fh;
+  $inputHelper;
+}
+
 sub runInstaller {
-  my $commandParam = '-invPtrLoc ~/oraInst.loc -silent -responseFile $respFileParam{pn} -waitforcompletion';
-  my $command = File::Spec->catfile(File::Spec->catdir($respFileParam{sh}, 'install'), 'runInstaller.sh').' '.$commandParam;
+  my $fileName = createInputFile();
+
+  my $commandParam = "-silent -responseFile $respFileParam{pn} -waitforcompletion < $fileName";
+  if (!isWin()) {
+    $commandParam = "-invPtrLoc $invPtrLoc ".$commandParam;
+  }
+
+  my $obj = "runInstaller.sh";
+  if (isWin()) {
+    $obj = "setup.bat";
+  }
+  my $command = File::Spec->catfile(File::Spec->catdir($respFileParam{sh}, 'install'), $obj).' '.$commandParam;
   print $command."\n";
+
   #system($command) and die "Error: Failed at running $command";
   #unlink $respFileParam{pn} if -e $respFileParam{pn};
+  unlink $fileName if -e $fileName;
 }
 
 

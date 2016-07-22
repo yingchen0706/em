@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 # $version$
-# 
+#
 # Copyright (c) 2005, 2016, Oracle and/or its affiliates. All rights reserved.
 #
 #  NAME
@@ -76,7 +76,7 @@ sub readParamFromIni {
   open my $fh, "<", $ini or die "Error: Could not find ini file";
   foreach my $line (<$fh>) {
     $line = trim($line);
-    if ($line ne "" && 
+    if ($line ne "" &&
       substr($line, 0, 1) ne "#") {
       my ($key, $val) = split /=/, $line, 2;
       $key = trim $key;
@@ -84,7 +84,7 @@ sub readParamFromIni {
       if ($key ne "") {
         $param{$key} = $val;
       }
-    } 
+    }
   }
   close $fh;
 }
@@ -120,7 +120,7 @@ sub unzipPatchset {
     rmtree($targetLoc);
   }
   mkpath($targetLoc);
-  
+
   my $command = "unzip -q \"".File::Spec->catfile($zipLoc, "*.zip")."\" -d $targetLoc\n";
   runCommand($command, "Error: Failed at unzip Patchset zip files");
 }
@@ -137,7 +137,7 @@ sub getImageVersion {
         $imgVersion = $words[1];
         last;
       }
-    } 
+    }
   }
 }
 
@@ -192,7 +192,7 @@ sub createResponseFile {
   print $respFile "productList={Siebel_Enterprise_Server}\n";
   print $respFile "languageList={$param{language}}\n";
   close $respFile;
-  print "Created response file for Siebel Image Creator.\n"; 
+  print "Created response file for Siebel Image Creator.\n";
 }
 
 sub invokeImageCreator {
@@ -208,7 +208,7 @@ sub invokeImageCreator {
   if (isWin()) {
     $command = "snic.bat";
   }
-  $command = File::Spec->catfile($targetLoc, $command).$postFix; 
+  $command = File::Spec->catfile($targetLoc, $command).$postFix;
 
   runCommand($command, "Error: failed at create Patchset image");
 }
@@ -225,7 +225,7 @@ sub postCreateProcess {
   print $tmp "<oneoff_inventory>\n";
   print $tmp "<patch_id number=\"$patchId\" />\n";
   print $tmp "</oneoff_inventory>\n";
-  close $tmp; 
+  close $tmp;
   my $readme = File::Spec->catfile($patchLoc, "README.txt");
   open $tmp, ">", $readme or die "Error: Could not create README.txt in $readme";
   close $tmp;
@@ -239,7 +239,7 @@ sub updateMetadataFile {
 
   open my $fhdst, ">", $metaFileNew or die "Error: error when update metadata xml file";
   open my $fhsrc, "<", $metaFile or die "Error: error when update metadata xml file";
- 
+
   while (my $line = <$fhsrc>) {
     if (index($line, "<files>") >= 0) {
       print $fhdst $line;
@@ -267,7 +267,7 @@ sub updateMetadataFile {
       }
     }
   }
-  
+
   close $fhdst;
   close $fhsrc;
 }
@@ -303,7 +303,7 @@ sub zipImage {
     unlink $finalLoc if (-e $finalLoc);
     my $sep = isWin() ? "&" : ";";
     runCommand("cd $targetLoc ".$sep." zip -rq $finalLoc $patchId", "Error: failed at compressing Patchset image");
-   
+
     updateMetadataFile();
 
     print "\nSuccess! Patch is in: $finalLoc";
@@ -320,7 +320,7 @@ sub process {
   # 1. unzip the patchset zips
   unzipPatchset();
 
-  # 2. create image 
+  # 2. create image
   createImage();
 
   # 3. zip the image
