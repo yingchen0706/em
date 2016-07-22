@@ -73,9 +73,9 @@ my %langMap = (
 
 &prepRespFileParams();
 
-if (defined $param{pre}) {
+if (defined $param{preCheck}) {
   &versionCheck(1);
-} elsif (defined $param{post}) {
+} elsif (defined $param{postCheck}) {
   &versionCheck();
 } else {
   &genRespFile();
@@ -149,8 +149,8 @@ sub versionCheck {
 }
 
 sub prepRespFileParams {
-  my $stageLoc = $param{sl};
-  my $platform = $param{pl};
+  my $stageLoc = $param{patchLoc};
+  my $platform = $param{platform};
 
   my $prodXML = File::Spec->catfile($stageLoc, 'products.txt');
   open my $fh, "<", $prodXML
@@ -179,7 +179,7 @@ sub prepRespFileParams {
   my $index = index($patchName, 'patchset');
   $respFileParam{sv} = substr($patchName, 0, $index).'0';
   $respFileParam{oh} = $param{oh};
-  $respFileParam{on} = $param{on};
+  $respFileParam{on} = $param{ohn};
   $respFileParam{gi} = 'true';
   $respFileParam{si} = 'true';
   $respFileParam{sl} = '['.&getLanguage.']';
