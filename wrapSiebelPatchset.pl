@@ -79,8 +79,8 @@ sub readParamFromIni {
     if ($line ne "" &&
       substr($line, 0, 1) ne "#") {
       my ($key, $val) = split /=/, $line, 2;
-      $key = trim $key;
-      $val = trim $val;
+      $key = trim($key);
+      $val = trim($val);
       if ($key ne "") {
         $param{$key} = $val;
       }
@@ -160,7 +160,7 @@ sub getPatchInfo {
 
   # get bug number from metadata file
   $metaFile = File::Spec->catfile($zipLoc, $metaFile);
-  open my $metaFH, $metaFile or die "Error: Could not open metadata xml file: $metaFile";
+  open my $metaFH, '<', $metaFile or die "Error: Could not open metadata xml file: $metaFile";
   my $start = 0;
   my $end = 0;
   my $line = "";
@@ -258,12 +258,10 @@ sub updateMetadataFile {
       print $fhdst $line;
     } elsif ($isInFiles) {
       if ($needCp) {
-        if (index($line, "<name>") >= 0) {
-          my $tmp = ">$patchId.zip<";
-          $line =~ s/>.*</$tmp/;
-        } elsif (index($line, "<size>") >= 0) {
-          $line =~ s/>.*</>$size</;
-        }
+        my $tmp = "<name>$patchId.zip<";
+        $line =~ s/<name>.*</$tmp/;
+        $line =~ s/<size>.*</<size>$size</;
+
         print $fhdst $line;
         if (index($line, "</file>") >= 0) {
           $needCp = 0;

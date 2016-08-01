@@ -127,9 +127,9 @@ sub getPatchsetNum {
 sub getVersFromOpatchOutput {
   my $output = shift;
   if ($output) {
-    $output =~ /Siebel SES PatchSet\s*(\d+\.[\.|\d]+)\n/;
+    $output =~ /Siebel SES PatchSet\s*(\d+\.[\.\d]+)\n/;
     if ($1) {
-      return &trim($1);
+      return $1;
     }
   }
   "";
