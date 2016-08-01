@@ -78,14 +78,14 @@ if (defined $param{preCheck}) {
 } elsif (defined $param{postCheck}) {
   &versionCheck();
 } else {
-  &genRespFile();
+  &createRspFile();
   &runInstaller();
 }
 
 sub trim {
   my $s = shift;
   $s =~ s/^\s+|\s+$//g;
-  return $s;
+  $s;
 }
 
 sub isWin {
@@ -113,35 +113,72 @@ sub processInputArgs {
   }
 }
 
-# do version check by checking whether the patchset version
-# already contained in opatch output
-sub versionCheck {
-  my $isPre = shift;
-  my $targetVer = $respFileParam{sv};
-  my $opatch = File::Spec->catfile(File::Spec->catdir($respFileParam{oh}, 'OPatch'), 'opatch');
+sub getPatchsetNum {
+  my $version = shift;
+  if ($version) {
+    $version =~ /(\d+)(\.)(\d+)(\.)(.+)/;
+    if (defined $3) {
+      return $3;
+    }
+  }
+  "";
+}
 
+sub getVersFromOpatchOutput {
+  my $output = shift;
+  if ($output) {
+    $output =~ /Siebel SES PatchSet\s*(\d+\.[\.|\d]+)\n/;
+    if ($1) {
+      return &trim($1);
+    }
+  }
+  "";
+}
+
+sub isNum {
+  my $str = shift;
+  if ($str) {
+    return ($str =~ /^\d+$/);
+  }
+  0;
+}
+
+# do version check by comparing the Patchset level of the Siebel target
+# and the Patchset to be applied
+sub versionCheck {
+  my $opatch = File::Spec->catfile(File::Spec->catdir($respFileParam{oh}, 'OPatch'), 'opatch');
   my $command = $opatch." lsinventory -oh $respFileParam{oh}";
   if (!&isWin()) {
     $command = $command." -invPtrLoc $invPtrLoc";
   }
+
+  print "Execute version check command:\n$command\n";
   my $output = `$command`;
+  print "Output:\n$output\n";
 
-  print "Execute version check command: $command\n";
-  print "Output: $output\n";
+  my $myPatchset = getPatchsetNum(getVersFromOpatchOutput($output));
+  if (!$myPatchset or !isNum($myPatchset)) {
+    die "Error: cannot get Siebel Patchset level from OPatch output";
+  }
+  my $targetPatchset = getPatchsetNum($respFileParam{sv});
+  if (!$targetPatchset or !isNum($targetPatchset)) {
+    die "Error: cannot get Patchset level of the Patchset from Products.txt";
+  }
 
+  my $isPre = shift;
   my $exitCode = 0;
   if ($isPre) {
-    if ((index $output, $targetVer) >= 0) {
-      print "Error: Patchset already applied.\n";
+    if ($targetPatchset <= $myPatchset) {
+      print "Error: Current Patchset level already higher/equal than the Patchset to be applied.\n";
       $exitCode = 1;
     } else {
       print "Version check succeeded.\n";
     }
   } else {
-    if ((index $output, $targetVer) >= 0) {
+    if ($targetPatchset eq $myPatchset) {
       print "Version check succeeded.\n";
     } else {
-      print  "Error: Version check failed.";
+      print  "Error: Version check failed.\n";
       $exitCode = 1;
     }
   }
@@ -157,7 +194,6 @@ sub prepRespFileParams {
     or die "Error: no products.txt found in Patchset.";
 
   my $patchName = '';
-
   while (my $line = <$fh>) {
     $line = trim($line);
     if ((substr $line, 0, 1) eq '[') {
@@ -165,6 +201,7 @@ sub prepRespFileParams {
       last;
     }
   }
+  close($fh);
 
   if ($patchName eq '') {
     die "Error: patch invalid, cannot find patch name in products.txt";
@@ -172,7 +209,6 @@ sub prepRespFileParams {
 
   my $disk1Path = File::Spec->catdir($stageLoc, $patchName, $platform,
     'Server', 'Siebel_Enterprise_Server', 'Disk1');
-
   $respFileParam{sh} = $disk1Path;
   $respFileParam{fl} = File::Spec->catfile(File::Spec->catdir($disk1Path, 'stage'), 'products.xml');
   $respFileParam{tl} = 'oracle.siebel.ses';
@@ -182,9 +218,9 @@ sub prepRespFileParams {
   $respFileParam{on} = $param{ohn};
   $respFileParam{gi} = 'true';
   $respFileParam{si} = 'true';
-  $respFileParam{sl} = '['.&getLanguage.']';
+  $respFileParam{sl} = '['.&getLanguage().']';
   $respFileParam{dl} = '{"oracle.siebel.ses","'.$respFileParam{sv}.'"}';
-  $respFileParam{pn} = File::Spec->catfile($param{oh}, "ps.rsp");
+  $respFileParam{pn} = File::Spec->catfile($param{oh}, time().".rsp");
 }
 
 sub getLanguage {
@@ -209,7 +245,7 @@ sub getLanguage {
   join(',', @langList);
 }
 
-sub genRespFile {
+sub createRspFile {
   my %args = %respFileParam;
 
   if (!defined $args{pn}) {
@@ -218,7 +254,7 @@ sub genRespFile {
   }
 
   my $filename = $args{pn};
-  my $tempfile = $filename.".temp";
+  my $tempfile = $filename.".tmp";
 
   if(open(temp_FH, ">", $tempfile)) {
     print temp_FH "RESPONSEFILE_VERSION=2.2.1.0.0\n";

@@ -185,13 +185,17 @@ sub getPatchInfo {
 
 sub createResponseFile {
   $patchLoc = File::Spec->catdir($targetLoc, $patchId);
-  open my $respFile, '>', File::Spec->catfile($targetLoc, "image.rsp") or die "Error: Could not create response file for image creator!";
-  print $respFile "imageVersion=\"$imgVersion\"\n";
-  print $respFile "imageDirectory=\"$patchLoc\"\n";
-  print $respFile "platformList={$platform}\n";
-  print $respFile "productList={Siebel_Enterprise_Server}\n";
-  print $respFile "languageList={$param{language}}\n";
-  close $respFile;
+  
+  my $respFile = File::Spec->catfile($targetLoc, "image.rsp");
+  
+  open my $fh, '>', $respFile or die "Error: Could not create response file for image creator!";
+  print $fh "imageVersion=\"$imgVersion\"\n";
+  print $fh "imageDirectory=\"$patchLoc\"\n";
+  print $fh "platformList={$platform}\n";
+  print $fh "productList={Siebel_Enterprise_Server}\n";
+  print $fh "languageList={$param{language}}\n";
+  close $fh;
+
   print "Created response file for Siebel Image Creator.\n";
 }
 
@@ -270,6 +274,7 @@ sub updateMetadataFile {
 
   close $fhdst;
   close $fhsrc;
+
 }
 
 sub createImage {
@@ -306,8 +311,9 @@ sub zipImage {
 
     updateMetadataFile();
 
-    print "\nSuccess! Patch is in: $finalLoc";
-    print "\nSuccess! Metadata is in: ".File::Spec->catfile($param{targetLoc}, $patchId.".xml")."\n\n";
+    print "\nSuccess!\n";
+    print "Patch is in: $finalLoc\n";
+    print "Metadata is in: ".File::Spec->catfile($param{targetLoc}, $patchId.".xml")."\n\n";
 
    } else {
     die "Error: Failed at creating Siebel image.";
