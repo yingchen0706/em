@@ -291,6 +291,17 @@ sub createInputFile {
 }
 
 sub runInstaller {
+  # need to give execute permission first
+  if (!isWin()) {
+    my $installPath = File::Spec->catdir($respFileParam{sh}, "install");
+    opendir(my $dh, $installPath);
+    my @files = readdir $dh;
+    closedir $dh;
+    foreach my $file (@files) {
+      chmod 0744, File::Spec->catfile($installPath, $file);
+    }
+  }
+
   my $fileName = createInputFile();
 
   my $commandParam = "-silent -responseFile $respFileParam{pn} -waitforcompletion < $fileName";
