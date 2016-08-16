@@ -100,9 +100,7 @@ sub runCommand {
   }
 }
 
-sub unzipPatchset {
-  print "\n[1] Unzip files\n";
-
+sub validate {
   $zipLoc = $param{zipLoc};
   if (!$zipLoc) {
     die "Error: Missing zip location in ini file!";
@@ -113,6 +111,27 @@ sub unzipPatchset {
     die "Error: Missing target locatioin in ini file!";
   }
   $targetLoc = File::Spec->catdir($targetLoc, time());
+
+  opendir(my $dh, $zipLoc);
+  my @list = readdir $dh;
+  closedir $dh;
+  my $zipExist = 0;
+
+  foreach (@list) {
+    if ($_ =~ /.*\.zip$/) {
+      $zipExist = 1;
+      last;
+    }
+  }
+
+  die "Error: no zip files found in $zipLoc" if !$zipExist;
+
+  &getPatchInfo();
+  
+}
+
+sub unzipPatchset {
+  print "\n[1] Unzip files\n";
 
   # make sure targetLoc exist and empty
   if (-e $targetLoc) {
@@ -148,7 +167,7 @@ sub getPatchInfo {
   closedir $dh;
 
   foreach (@list) {
-    if ($_ =~ /.*\.xml/) {
+    if ($_ =~ /.*\.xml$/) {
       $metaFile = $_;
       last;
     }
@@ -181,6 +200,12 @@ sub getPatchInfo {
   }
   close $metaFH;
 
+  if ($patchId eq "") {
+    die "Error: Could not find bug number from metadata xml file";
+  }
+  if ($platform eq "") {
+    die "Error: Could not find platform info from metadata xml file";
+  }
 }
 
 sub createResponseFile {
@@ -283,14 +308,7 @@ sub createImage {
     die "failed at getting imageVersion parameter of response file for image creator";
   }
 
-  getPatchInfo();
-  if ($patchId eq "") {
-    die "Error: Could not find bug number from metadata xml file";
-  }
-  if ($platform eq "") {
-    die "Error: Could not find platform info from metadata xml file";
-  }
-
+  
   createResponseFile();
 
   invokeImageCreator();
@@ -308,10 +326,13 @@ sub zipImage {
     runCommand("cd $targetLoc ".$sep." zip -rq $finalLoc $patchId", "Error: failed at compressing Patchset image");
 
     updateMetadataFile();
+    rmtree($targetLoc);
 
     print "\nSuccess!\n";
     print "Patch is in: $finalLoc\n";
     print "Metadata is in: ".File::Spec->catfile($param{targetLoc}, $patchId.".xml")."\n\n";
+  
+    return;
 
    } else {
     die "Error: Failed at creating Siebel image.";
@@ -320,6 +341,8 @@ sub zipImage {
 }
 
 sub process {
+  # 0. validate patch content
+  validate();
 
   # 1. unzip the patchset zips
   unzipPatchset();
